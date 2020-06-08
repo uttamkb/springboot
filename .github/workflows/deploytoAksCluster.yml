@@ -1,0 +1,51 @@
+on: [push]
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@master
+    
+    - uses: azure/docker-login@v1
+      with:
+        login-server: acruttam.azurecr.io
+        username: ${{ secrets.acr_acruttam_username }}
+        password: ${{ secrets.acr_acruttam_password }}
+    
+    - name: Build and push image to ACR
+      id: build-image
+      run: |
+        docker build "$GITHUB_WORKSPACE/" -f  "Dockerfile" -t acruttam.azurecr.io/askcluster1:${{ github.sha }}
+        docker push acruttam.azurecr.io/askcluster1:${{ github.sha }}
+    
+    - uses: azure/k8s-set-context@v1
+      with:
+         kubeconfig: ${{ secrets.aks_askcluster1_kubeConfig }}
+      id: login
+    
+    - name: Create namespace
+      run: |
+        namespacePresent=`kubectl get namespace | grep askcluster12626 | wc -l`
+        if [ $namespacePresent -eq 0 ]
+        then
+            echo `kubectl create namespace askcluster12626`
+        fi
+
+    - uses: azure/k8s-create-secret@v1
+      with:
+        namespace: askcluster12626
+        container-registry-url: acruttam.azurecr.io
+        container-registry-username: ${{ secrets.acr_acruttam_username }}
+        container-registry-password: ${{ secrets.acr_acruttam_password }}
+        secret-name: askcluster1dockerauth
+       
+    - uses: azure/k8s-deploy@v1
+      with:
+        namespace: askcluster12626
+        manifests: |
+          manifests/deployment.yml
+          manifests/service.yml
+          manifests/ingress.yml
+        images: |
+          acruttam.azurecr.io/askcluster1:${{ github.sha }}
+        imagepullsecrets: |
+          askcluster1dockerauth
